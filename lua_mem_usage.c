@@ -133,7 +133,7 @@ static const char *code =
 "local arr = {}\n"
 "for i = 1, 1024 * 1 do\n"
 " local r = {}\n"
-" for j = 1, 1024 do\n"
+" for j = 1, 1 do\n"
 "  r[j] = j + i\n"
 " end\n"
 " arr[i] = r\n"
@@ -145,31 +145,29 @@ static int thread_mem_allocating(void *arg) {
         usleep(100);
     }
     
+    /*
     const int num = 1024 * 100;
     lua_State **vms = calloc(num, sizeof(vms[0]));
     for (int i = 0; i < num; i++) {
         current_i = i;
         vms[i] = luaL_newstate();
-        luaL_openlibs(vms[i]);
-        /*
+        //luaL_openlibs(vms[i]);
         if (luaL_dostring(vms[i], code) != LUA_OK) {
             printf("err '%s'\n", lua_tostring(vms[i], -1));
             //abort();
             exit(EXIT_FAILURE);
         }
-        */
         lua_gc(vms[i], LUA_GCCOLLECT);
         assert(vms[i]);
         usleep(10000);
     }
     //*/
 
-    /*
     const int num = 1024 * 100;
     char **vms = calloc(num, sizeof(vms[0]));
     for (int i = 0; i < num; i++) {
         current_i = i;
-        size_t sz = 1024 * 4;
+        size_t sz = 1024 * 8;
         vms[i] = malloc(sz);
         assert(vms[i]);
         for (int j = 0; j < sz; j++) {
