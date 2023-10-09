@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include "lua.h"
@@ -8,12 +9,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <threads.h>
+#include <unistd.h>
 
 static void term_clear() {
     printf("\033[2J");
 }
 
 static _Atomic(int) current_i = 0;
+static _Atomic(long int) rss_start = 0;
 
 static void file_list(const char *path, int deep_counter) {
     assert(path);
@@ -59,58 +62,128 @@ static void file_list(const char *path, int deep_counter) {
 }
 
 static int thread_mem_usage_printing(void *arg) {
+    unsigned int size, resident, shared, text, lib, data, dt;
+    FILE *file = fopen("/proc/self/statm", "r");
+    char *line = NULL;
+    assert(file);
+
+    size_t len = 0;
+    size_t ret = getline(&line, &len, file);
+    assert(line);
+    sscanf(
+        line, "%u %u %u %u %u %u %u",
+        &size, &resident, &shared, &text, &lib, &data, &dt
+    );
+    rss_start = resident;
+    free(line);
+    fclose(file);
+
     for (;;) {
         term_clear();
-        FILE *file = fopen("/proc/self/statm", "r");
-        assert(file);
-        //char line[256] = {};
-        char *line = NULL;
-        size_t len = 0;
-        //size_t ret = getline((char**)&line, &len, file);
+
+        file = fopen("/proc/self/statm", "r");
         size_t ret = getline(&line, &len, file);
         assert(line);
-        //printf("line '%s'\n", line);
-        //printf("len %zu\n", len);
-        //printf("ret %zu\n", ret);
-        unsigned int size, resident, shared, text, lib, data, dt;
         sscanf(
             line, "%u %u %u %u %u %u %u",
             &size, &resident, &shared, &text, &lib, &data, &dt
         );
+
         int _current_i = current_i ? current_i : 1;
-        float average_vm_size = data / (float)_current_i;
+        float average_vm_size = (resident - rss_start) / (float)_current_i;
+        const int pgsz = 4096;
+        const float megabt = 1024. * 1024.;
+        printf("rss_start %lu\n", rss_start);
+        printf("current_i: %d\n", _current_i);
         printf(
-            "size %u\n"
-            "resident %u\n"
-            "shared %u\n"
-            "text %u\n"
-            "lib %u\n"
-            "data %u\n"
-            "dt %u\n"
-            "average vm size %.3f\n", 
-            size, resident, shared, text, lib, data, dt, average_vm_size
+            "size %.3f\n"
+            "resident %.3f\n"
+            "shared %.3f\n"
+            "text %.3f\n"
+            "lib %.3f\n"
+            "data %.3f\n"
+            "dt %.3f\n"
+            "average vm size %.3f\n" 
+            "rss %.3f\n",
+            size * pgsz / megabt, 
+            resident * pgsz / megabt,
+            shared * pgsz / megabt,
+            text * pgsz / megabt, 
+            lib * pgsz / megabt, 
+            data * pgsz / megabt, 
+            dt * pgsz / megabt, 
+            average_vm_size,
+            (resident + text + data) * pgsz / megabt
         );
-        free(line);
+
+        pid_t pid = getpid();
+        printf("pid %d\n", pid);
+
+        if (line) {
+            free(line);
+            line = NULL;
+        }
         fclose(file);
         usleep(1000);
     }
     return 0;
 }
 
+static const char *code = 
+"local arr = {}\n"
+"for i = 1, 1024 * 1 do\n"
+" local r = {}\n"
+" for j = 1, 1024 do\n"
+"  r[j] = j + i\n"
+" end\n"
+" arr[i] = r\n"
+"end";
+
 static int thread_mem_allocating(void *arg) {
+
+    while (!rss_start) {
+        usleep(100);
+    }
+    
     const int num = 1024 * 100;
     lua_State **vms = calloc(num, sizeof(vms[0]));
     for (int i = 0; i < num; i++) {
         current_i = i;
         vms[i] = luaL_newstate();
+        luaL_openlibs(vms[i]);
+        /*
+        if (luaL_dostring(vms[i], code) != LUA_OK) {
+            printf("err '%s'\n", lua_tostring(vms[i], -1));
+            //abort();
+            exit(EXIT_FAILURE);
+        }
+        */
+        lua_gc(vms[i], LUA_GCCOLLECT);
         assert(vms[i]);
         usleep(10000);
     }
+    //*/
+
+    /*
+    const int num = 1024 * 100;
+    char **vms = calloc(num, sizeof(vms[0]));
+    for (int i = 0; i < num; i++) {
+        current_i = i;
+        size_t sz = 1024 * 4;
+        vms[i] = malloc(sz);
+        assert(vms[i]);
+        for (int j = 0; j < sz; j++) {
+            vms[i][j] = j * 2;
+        }
+        assert(vms[i]);
+        usleep(10000);
+    }
+    // */
+
     return 0;
 }
 
 int main() {
-
     //luaL_dostring(vm, 
 //"local file = io.open(/proc/"
     //);
